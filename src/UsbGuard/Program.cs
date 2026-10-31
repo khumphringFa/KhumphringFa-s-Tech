@@ -37,6 +37,7 @@ internal sealed class GuardForm : Form
     private int missingChecks;
     private readonly NumericUpDown lockDelay = new() { Minimum = 3, Maximum = 30, Value = 3, Width = 58 };
     private readonly Button openLogs = new() { Text = "View event log", AutoSize = true };
+    private readonly Button helloSettings = new() { Text = "Windows Hello settings", AutoSize = true };
     private readonly string logPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "KhumphringFaTech", "UsbGuard", "events.log");
@@ -50,8 +51,8 @@ internal sealed class GuardForm : Form
     {
         Text = "KhumphringFa's Tech — USB Guard";
         Width = 540;
-        Height = 345;
-        MinimumSize = new Size(540, 345);
+        Height = 385;
+        MinimumSize = new Size(540, 385);
         StartPosition = FormStartPosition.CenterScreen;
 
         var layout = new FlowLayoutPanel
@@ -79,6 +80,7 @@ internal sealed class GuardForm : Form
         settingsRow.Controls.Add(openLogs);
         layout.Controls.Add(settingsRow);
         layout.Controls.Add(startWithWindows);
+        layout.Controls.Add(helloSettings);
         layout.Controls.Add(status);
         layout.Controls.Add(new Label {
             AutoSize = true,
@@ -94,6 +96,17 @@ internal sealed class GuardForm : Form
         start.Click += (_, _) => StartMonitoring();
         stop.Click += (_, _) => StopMonitoring();
         timer.Tick += (_, _) => CheckKey();
+        helloSettings.Click += (_, _) => {
+            try {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo {
+                    FileName = "ms-settings:signinoptions",
+                    UseShellExecute = true
+                });
+            }
+            catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException) {
+                MessageBox.Show("Cannot open Windows sign-in settings: " + ex.Message);
+            }
+        };
         openLogs.Click += (_, _) => {
             try {
                 Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
