@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
+using Microsoft.Win32;
 
 namespace UsbGuard;
 
@@ -27,6 +28,12 @@ internal sealed class GuardForm : Form
     private readonly Button stop = new() { Text = "Stop monitoring", AutoSize = true, Enabled = false };
     private readonly Button refresh = new() { Text = "Refresh drives", AutoSize = true };
     private readonly System.Windows.Forms.Timer timer = new() { Interval = 1000 };
+    private const string StartupRegistryPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
+    private const string StartupValueName = "KhumphringFaUsbGuard";
+    private readonly CheckBox startWithWindows = new() { Text = "Launch with Windows (monitoring remains off)", AutoSize = true };
+    private readonly NotifyIcon tray = new() { Icon = SystemIcons.Shield, Text = "USB Guard: not monitoring", Visible = true };
+    private readonly ContextMenuStrip trayMenu = new();
+    private bool exiting;
     private byte[]? expectedHash;
     private int missingChecks;
 
@@ -61,6 +68,7 @@ internal sealed class GuardForm : Form
         secondRow.Controls.Add(start);
         secondRow.Controls.Add(stop);
         layout.Controls.Add(secondRow);
+        layout.Controls.Add(startWithWindows);
         layout.Controls.Add(status);
         layout.Controls.Add(new Label {
             AutoSize = true,
@@ -75,9 +83,64 @@ internal sealed class GuardForm : Form
         start.Click += (_, _) => StartMonitoring();
         stop.Click += (_, _) => StopMonitoring();
         timer.Tick += (_, _) => CheckKey();
-        FormClosing += (_, _) => timer.Stop();
+        trayMenu.Items.Add("Show USB Guard", null, (_, _) => ShowFromTray());
+        trayMenu.Items.Add("Start monitoring", null, (_, _) => StartMonitoring());
+        trayMenu.Items.Add("Stop monitoring", null, (_, _) => StopMonitoring());
+        trayMenu.Items.Add(new ToolStripSeparator());
+        trayMenu.Items.Add("Exit USB Guard", null, (_, _) => {
+            exiting = true;
+            timer.Stop();
+            Close();
+        });
+        tray.ContextMenuStrip = trayMenu;
+        tray.DoubleClick += (_, _) => ShowFromTray();
+        Resize += (_, _) => {
+            if (WindowState == FormWindowState.Minimized) {
+                Hide();
+                tray.BalloonTipTitle = "USB Guard";
+                tray.BalloonTipText = "USB Guard is running in the notification area.";
+                tray.ShowBalloonTip(1500);
+            }
+        };
+        FormClosing += (_, _) => {
+            timer.Stop();
+            tray.Visible = false;
+            tray.Dispose();
+        };
+        try {
+            using var key = Registry.CurrentUser.OpenSubKey(StartupRegistryPath);
+            startWithWindows.Checked = key?.GetValue(StartupValueName) is string;
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or System.Security.SecurityException) {
+            status.Text = "Could not read Windows startup settings.";
+        }
+        startWithWindows.CheckedChanged += (_, _) => SetStartWithWindows();
         RefreshDrives();
         LoadVerifier();
+    }
+
+    private void ShowFromTray()
+    {
+        Show();
+        WindowState = FormWindowState.Normal;
+        Activate();
+    }
+
+    private void SetStartWithWindows()
+    {
+        try
+        {
+            using var key = Registry.CurrentUser.CreateSubKey(StartupRegistryPath);
+            if (key is null) throw new UnauthorizedAccessException("Startup registry key not accessible.");
+            if (startWithWindows.Checked)
+                key.SetValue(StartupValueName, "\"" + Application.ExecutablePath + "\"");
+            else
+                key.DeleteValue(StartupValueName, false);
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or System.Security.SecurityException or IOException)
+        {
+            MessageBox.Show("Cannot change Windows startup: " + ex.Message);
+        }
     }
 
     private void RefreshDrives()
@@ -185,6 +248,7 @@ internal sealed class GuardForm : Form
         start.Enabled = false;
         stop.Enabled = true;
         status.Text = "Monitoring active. Paired USB detected.";
+        tray.Text = "USB Guard: monitoring";
     }
 
     private void StopMonitoring()
@@ -194,6 +258,7 @@ internal sealed class GuardForm : Form
         start.Enabled = true;
         stop.Enabled = false;
         status.Text = "Monitoring stopped.";
+        tray.Text = "USB Guard: not monitoring";
         missingChecks = 0;
     }
 
@@ -211,6 +276,7 @@ internal sealed class GuardForm : Form
         // Lock only once. A real Windows account unlock still requires Windows authentication.
         StopMonitoring();
         status.Text = "USB removed. Windows lock requested. Monitoring stopped.";
+        tray.Text = "USB Guard: USB removed";
         if (!LockWorkStation())
             MessageBox.Show("Windows could not be locked. Check session permissions.");
     }
