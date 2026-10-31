@@ -100,7 +100,7 @@ internal sealed class GuardForm : Form
                 if (!File.Exists(logPath)) File.WriteAllText(logPath, "");
                 System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo {
                     FileName = "notepad.exe",
-                    Arguments = "\\"" + logPath + "\\"",
+                    Arguments = string.Concat((char)34, logPath, (char)34),
                     UseShellExecute = true
                 });
             }
