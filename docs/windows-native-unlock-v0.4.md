@@ -33,3 +33,23 @@ Determine whether the USB is an ordinary flash drive or a hardware FIDO2/securit
 
 ## Next decision
 Choose authentication path based on account type and whether a dedicated FIDO2 security key is available. There is currently **no native USB auto-unlock implementation** in this repository.
+
+## Decision for personal Microsoft account + ordinary USB flash drive (2026-10-31)
+
+**Supported approach chosen:** keep USB Guard's native `LockWorkStation()` trigger. Unlock through Windows' built-in Windows Hello PIN, fingerprint, face recognition, or account password. A normal USB mass-storage device does **not** provide a supported unattended Windows unlock method for a personal Microsoft account.
+
+v0.4 adds a **Windows Hello settings** button that opens `ms-settings:signinoptions`. This is a settings shortcut, **not** an auto-unlock implementation. Configure Windows Hello directly in Windows and test it before relying on the app.
+
+### Sign-in setup
+1. Open USB Guard -> **Windows Hello settings**, or Windows Settings -> Accounts -> Sign-in options.
+2. Set up **Windows Hello PIN** (and fingerprint / face if compatible hardware exists).
+3. Use Win+L to lock Windows and verify Windows Hello signs you back in.
+4. With your paired USB inserted, start monitoring in USB Guard. Removing it will call Windows native lock after the configured delay. Reinserting it does not replace Windows sign-in.
+5. Once signed in, rearm monitoring manually; native lock stops the monitoring session intentionally.
+
+### Not supported or promised
+- USB-only automatic unlock of the real Windows lock screen using a clonable flash-drive key file.
+- Password replay, registry bypasses, simulated keystrokes at Winlogon, or disabling other credential providers.
+- Assuming security key sign-in for work/school Microsoft Entra accounts also applies automatically to a personal Microsoft account's Windows desktop.
+
+For a materially different authentication experience, first choose supported hardware/security key authentication and verify the exact Windows account/device enrollment scenario with Microsoft documentation. Keep a recovery sign-in available at all times.
