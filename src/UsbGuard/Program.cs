@@ -33,9 +33,14 @@ internal sealed class GuardForm : Form
     private readonly CheckBox startWithWindows = new() { Text = "Launch with Windows (monitoring remains off)", AutoSize = true };
     private readonly NotifyIcon tray = new() { Icon = SystemIcons.Shield, Text = "USB Guard: not monitoring", Visible = true };
     private readonly ContextMenuStrip trayMenu = new();
-    private bool exiting;
     private byte[]? expectedHash;
     private int missingChecks;
+    private readonly NumericUpDown lockDelay = new() { Minimum = 3, Maximum = 30, Value = 3, Width = 58 };
+    private readonly Button openLogs = new() { Text = "View event log", AutoSize = true };
+    private readonly string logPath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "KhumphringFaTech", "UsbGuard", "events.log");
+    private bool wasMissing;
 
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -45,8 +50,8 @@ internal sealed class GuardForm : Form
     {
         Text = "KhumphringFa's Tech — USB Guard";
         Width = 540;
-        Height = 290;
-        MinimumSize = new Size(540, 290);
+        Height = 345;
+        MinimumSize = new Size(540, 345);
         StartPosition = FormStartPosition.CenterScreen;
 
         var layout = new FlowLayoutPanel
@@ -68,13 +73,19 @@ internal sealed class GuardForm : Form
         secondRow.Controls.Add(start);
         secondRow.Controls.Add(stop);
         layout.Controls.Add(secondRow);
+        var settingsRow = new FlowLayoutPanel { AutoSize = true };
+        settingsRow.Controls.Add(new Label { Text = "Lock after USB missing (seconds):", AutoSize = true, Margin = new Padding(3, 6, 3, 3) });
+        settingsRow.Controls.Add(lockDelay);
+        settingsRow.Controls.Add(openLogs);
+        layout.Controls.Add(settingsRow);
         layout.Controls.Add(startWithWindows);
         layout.Controls.Add(status);
         layout.Controls.Add(new Label {
             AutoSize = true,
             MaximumSize = new Size(480, 0),
             Text = "Removing the paired USB while monitoring locks Windows. " +
-                   "Windows PIN/password is always required to sign back in."
+                   "Use your Windows Hello PIN, fingerprint, face recognition, or password to sign back in. " +
+                   "Inserting the USB does not unlock a native Windows session."
         });
         Controls.Add(layout);
 
@@ -83,12 +94,25 @@ internal sealed class GuardForm : Form
         start.Click += (_, _) => StartMonitoring();
         stop.Click += (_, _) => StopMonitoring();
         timer.Tick += (_, _) => CheckKey();
+        openLogs.Click += (_, _) => {
+            try {
+                Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
+                if (!File.Exists(logPath)) File.WriteAllText(logPath, "");
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo {
+                    FileName = "notepad.exe",
+                    Arguments = "\\"" + logPath + "\\"",
+                    UseShellExecute = true
+                });
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception) {
+                MessageBox.Show("Cannot open log: " + ex.Message);
+            }
+        };
         trayMenu.Items.Add("Show USB Guard", null, (_, _) => ShowFromTray());
         trayMenu.Items.Add("Start monitoring", null, (_, _) => StartMonitoring());
         trayMenu.Items.Add("Stop monitoring", null, (_, _) => StopMonitoring());
         trayMenu.Items.Add(new ToolStripSeparator());
         trayMenu.Items.Add("Exit USB Guard", null, (_, _) => {
-            exiting = true;
             timer.Stop();
             Close();
         });
@@ -201,6 +225,7 @@ internal sealed class GuardForm : Form
             File.WriteAllBytes(verifierPath, encrypted);
             expectedHash = verifier;
             status.Text = "USB paired. You may start monitoring.";
+            LogEvent("USB paired");
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or CryptographicException)
         {
@@ -243,12 +268,14 @@ internal sealed class GuardForm : Form
             return;
         }
         missingChecks = 0;
+        wasMissing = false;
         timer.Start();
         pair.Enabled = false;
         start.Enabled = false;
         stop.Enabled = true;
         status.Text = "Monitoring active. Paired USB detected.";
         tray.Text = "USB Guard: monitoring";
+        LogEvent("Monitoring started");
     }
 
     private void StopMonitoring()
@@ -259,25 +286,47 @@ internal sealed class GuardForm : Form
         stop.Enabled = false;
         status.Text = "Monitoring stopped.";
         tray.Text = "USB Guard: not monitoring";
+        LogEvent("Monitoring stopped");
         missingChecks = 0;
+    }
+
+    private void LogEvent(string message)
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
+            File.AppendAllText(logPath, DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm:ss zzz") +
+                " | " + message + Environment.NewLine);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Failure to write a diagnostic log must never break device monitoring.
+            System.Diagnostics.Debug.WriteLine(ex.Message);
+        }
     }
 
     private void CheckKey()
     {
         if (IsPairedUsbPresent())
         {
+            if (wasMissing) LogEvent("Paired USB reconnected before lock");
+            wasMissing = false;
             missingChecks = 0;
             status.Text = "Monitoring active. Paired USB detected.";
             return;
         }
+        if (!wasMissing) LogEvent("Paired USB became unavailable");
+        wasMissing = true;
         missingChecks++;
-        status.Text = "USB missing (" + missingChecks + "/3 checks).";
-        if (missingChecks < 3) return;
+        status.Text = "USB missing (" + missingChecks + "/" + lockDelay.Value + " seconds).";
+        if (missingChecks < (int)lockDelay.Value) return;
         // Lock only once. A real Windows account unlock still requires Windows authentication.
         StopMonitoring();
         status.Text = "USB removed. Windows lock requested. Monitoring stopped.";
         tray.Text = "USB Guard: USB removed";
-        if (!LockWorkStation())
+        bool locked = LockWorkStation();
+        LogEvent(locked ? "Windows native lock requested" : "Windows native lock failed");
+        if (!locked)
             MessageBox.Show("Windows could not be locked. Check session permissions.");
     }
 }
