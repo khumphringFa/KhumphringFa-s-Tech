@@ -50,3 +50,23 @@ Result: `publish/UsbGuard.exe`. Windows security warnings or code-signing prompt
 - The start-with-Windows option only launches the app; it does not automatically arm monitoring.
 
 **Test carefully:** Save work, pair your USB, select a delay, start monitoring, remove the USB, then reinsert within the delay and verify that the lock is canceled. Repeat with the USB absent beyond the delay and verify Windows locks. Reinsert and sign in with Windows Hello, then rearm monitoring.
+
+
+## v0.5 — USB Raptor-style convenience mode
+
+USB Guard now offers **two different modes**:
+
+- **Default (convenience screen)**: remove the paired USB -> the app displays its full-screen reminder. Reinsert the paired USB -> the app automatically dismisses that screen and continues monitoring. **This does not lock or unlock Windows. It can be bypassed or terminated, and must NOT be treated as protection against an unauthorized user.**
+- **Native Windows Lock** (check the option): remove the paired USB -> Windows calls `LockWorkStation()`. Windows Hello PIN, biometric verification, or account credentials are still needed to unlock. Reinsert alone cannot unlock it.
+
+### Test v0.5
+
+1. Save open files and keep Windows PIN/password available.
+2. Download the successful GitHub Actions artifact for the latest commit; close any old copy of the app before launching it.
+3. Insert an already paired removable USB, leave **Use native Windows Lock** unchecked, and select **Start monitoring**.
+4. Remove USB and allow the configured 3–30 second delay. A clearly labeled convenience screen should appear.
+5. Reinsert the USB. The convenience screen should disappear without Windows credentials.
+6. If needed, click **Stop protection / close screen** to exit convenience mode.
+7. Verify **Native Windows Lock** mode separately. It always requires Windows authentication to resume.
+
+**Warning**: The convenience screen is only a visible reminder/deterrent and is not a system security boundary. For real security use native Windows locking and BitLocker where appropriate. The ordinary USB key file is copyable; it is not hardware-backed authentication.
