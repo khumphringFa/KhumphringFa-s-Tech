@@ -40,3 +40,13 @@ dotnet publish src/UsbGuard/UsbGuard.csproj -c Release -r win-x64 --self-contain
 ```
 
 Result: `publish/UsbGuard.exe`. Windows security warnings or code-signing prompts may appear for unsigned development builds.
+
+## v0.3 monitoring and Windows Hello
+
+- Optional **3–30 second** missing-key delay (default 3 seconds); reinsert during the delay to cancel locking.
+- View the local security event log using **View event log**. It is stored under `%LOCALAPPDATA%\\KhumphringFaTech\\UsbGuard\\events.log`.
+- Native Windows locking remains in place. To unlock, use your configured **Windows Hello PIN, fingerprint, face recognition, or Windows password** from the Windows sign-in screen. USB insertion alone cannot unlock Windows.
+- Monitoring stops after requesting the native lock; after returning to Windows, click **Start monitoring** to rearm it. This prevents repeated lock requests or an unexpected new lock while signing in.
+- The start-with-Windows option only launches the app; it does not automatically arm monitoring.
+
+**Test carefully:** Save work, pair your USB, select a delay, start monitoring, remove the USB, then reinsert within the delay and verify that the lock is canceled. Repeat with the USB absent beyond the delay and verify Windows locks. Reinsert and sign in with Windows Hello, then rearm monitoring.
