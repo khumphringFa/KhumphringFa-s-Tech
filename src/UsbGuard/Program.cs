@@ -42,6 +42,11 @@ internal sealed class GuardForm : Form
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "KhumphringFaTech", "UsbGuard", "events.log");
     private bool wasMissing;
+    private readonly CheckBox nativeMode = new() {
+        Text = "Use native Windows Lock (requires Windows sign-in to unlock)",
+        AutoSize = true
+    };
+    private UsbPresenceScreen? presenceScreen;
 
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -51,8 +56,8 @@ internal sealed class GuardForm : Form
     {
         Text = "KhumphringFa's Tech — USB Guard";
         Width = 540;
-        Height = 385;
-        MinimumSize = new Size(540, 385);
+        Height = 435;
+        MinimumSize = new Size(540, 435);
         StartPosition = FormStartPosition.CenterScreen;
 
         var layout = new FlowLayoutPanel
@@ -61,7 +66,7 @@ internal sealed class GuardForm : Form
             WrapContents = false, Padding = new Padding(18), AutoScroll = true
         };
         layout.Controls.Add(new Label {
-            Text = "USB Guard • Windows native lock",
+            Text = "USB Guard • USB-controlled convenience screen",
             Font = new Font(Font.FontFamily, 13, FontStyle.Bold),
             AutoSize = true, Margin = new Padding(3, 0, 3, 12)
         });
@@ -79,15 +84,16 @@ internal sealed class GuardForm : Form
         settingsRow.Controls.Add(lockDelay);
         settingsRow.Controls.Add(openLogs);
         layout.Controls.Add(settingsRow);
+        layout.Controls.Add(nativeMode);
         layout.Controls.Add(startWithWindows);
         layout.Controls.Add(helloSettings);
         layout.Controls.Add(status);
         layout.Controls.Add(new Label {
             AutoSize = true,
             MaximumSize = new Size(480, 0),
-            Text = "Removing the paired USB while monitoring locks Windows. " +
-                   "Use your Windows Hello PIN, fingerprint, face recognition, or password to sign back in. " +
-                   "Inserting the USB does not unlock a native Windows session."
+            Text = "Default: USB removal shows a convenience screen; reinsertion dismisses it. " +
+                   "This screen is NOT a secure Windows lock. Enable native mode to use " +
+                   "Windows locking, which requires PIN/password/Hello to unlock."
         });
         Controls.Add(layout);
 
@@ -127,6 +133,7 @@ internal sealed class GuardForm : Form
         trayMenu.Items.Add(new ToolStripSeparator());
         trayMenu.Items.Add("Exit USB Guard", null, (_, _) => {
             timer.Stop();
+            ClosePresenceScreen();
             Close();
         });
         tray.ContextMenuStrip = trayMenu;
@@ -141,6 +148,7 @@ internal sealed class GuardForm : Form
         };
         FormClosing += (_, _) => {
             timer.Stop();
+            ClosePresenceScreen();
             tray.Visible = false;
             tray.Dispose();
         };
@@ -283,6 +291,7 @@ internal sealed class GuardForm : Form
         missingChecks = 0;
         wasMissing = false;
         timer.Start();
+        nativeMode.Enabled = false;
         pair.Enabled = false;
         start.Enabled = false;
         stop.Enabled = true;
@@ -294,6 +303,8 @@ internal sealed class GuardForm : Form
     private void StopMonitoring()
     {
         timer.Stop();
+        ClosePresenceScreen();
+        nativeMode.Enabled = true;
         pair.Enabled = true;
         start.Enabled = true;
         stop.Enabled = false;
@@ -318,11 +329,32 @@ internal sealed class GuardForm : Form
         }
     }
 
+    private void ClosePresenceScreen()
+    {
+        if (presenceScreen is null) return;
+        var screen = presenceScreen;
+        presenceScreen = null;
+        if (!screen.IsDisposed) screen.Close();
+    }
+
+    private void ShowPresenceScreen()
+    {
+        if (presenceScreen is not null) return;
+        presenceScreen = new UsbPresenceScreen();
+        presenceScreen.StopRequested += (_, _) => StopMonitoring();
+        presenceScreen.Show();
+        LogEvent("Convenience screen shown; not a native Windows lock");
+    }
+
     private void CheckKey()
     {
         if (IsPairedUsbPresent())
         {
-            if (wasMissing) LogEvent("Paired USB reconnected before lock");
+            if (wasMissing) LogEvent("Paired USB reconnected");
+            if (presenceScreen is not null) {
+                ClosePresenceScreen();
+                LogEvent("Convenience screen dismissed automatically");
+            }
             wasMissing = false;
             missingChecks = 0;
             status.Text = "Monitoring active. Paired USB detected.";
@@ -333,7 +365,14 @@ internal sealed class GuardForm : Form
         missingChecks++;
         status.Text = "USB missing (" + missingChecks + "/" + lockDelay.Value + " seconds).";
         if (missingChecks < (int)lockDelay.Value) return;
-        // Lock only once. A real Windows account unlock still requires Windows authentication.
+        if (!nativeMode.Checked)
+        {
+            ShowPresenceScreen();
+            status.Text = "USB absent: convenience screen active. Insert USB to dismiss.";
+            tray.Text = "USB Guard: screen active";
+            return; // Keep monitoring: USB reinsertion dismisses the screen.
+        }
+        // Native Windows locking cannot be dismissed by this application.
         StopMonitoring();
         status.Text = "USB removed. Windows lock requested. Monitoring stopped.";
         tray.Text = "USB Guard: USB removed";
